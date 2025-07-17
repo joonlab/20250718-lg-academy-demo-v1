@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import docx
-from docx.shared import Cm, Pt, RGBColor
+from docx.shared import Cm, Pt
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -52,51 +52,62 @@ issue_list = [
     "(기타 각 사에서 성과관리 강화를 위해 개선이 필요한 사항들 / 타사 의견을 들어보고 싶은 사례들에 대해 기재)"
 ]
 
-# --- Word 문서 생성 함수 (블록 느낌 강화) ---
-# 테이블 셀 테두리 설정을 위한 헬퍼 함수
+# --- Word 문서 생성을 위한 헬퍼 함수들 ---
+
+# [수정됨] 셀 내부 여백(패딩) 설정을 위한 헬퍼 함수
+def set_cell_margins(cell, **kwargs):
+    """
+    셀의 내부 여백을 설정합니다. top, bottom, left, right 값을 dxa 단위(1/20 pt)로 받습니다.
+    """
+    tcPr = cell._tc.get_or_add_tcPr()
+    tcMar = tcPr.get_or_add_tcMar()
+
+    for key, value in kwargs.items():
+        if key in ["top", "bottom", "left", "right"]:
+            # OxmlElement를 직접 생성하여 추가하는 올바른 방법
+            mar_elm = OxmlElement(f'w:{key}')
+            mar_elm.set(qn('w:w'), str(value))
+            mar_elm.set(qn('w:type'), 'dxa')
+            tcMar.append(mar_elm)
+
+# 셀 테두리 설정을 위한 헬퍼 함수
 def set_cell_border(cell, **kwargs):
     tcPr = cell._tc.get_or_add_tcPr()
-    tcBorders = tcPr.first_child_found_in("w:tcBorders")
-    if tcBorders is None:
-        tcBorders = OxmlElement("w:tcBorders")
-        tcPr.append(tcBorders)
+    tcBorders = tcPr.get_or_add_tcBorders()
     
-    for edge in ('start', 'top', 'end', 'bottom', 'insideH', 'insideV'):
+    for edge in ('start', 'top', 'end', 'bottom'):
         edge_data = kwargs.get(edge)
         if edge_data:
-            tag = 'w:{}'.format(edge)
+            tag = f'w:{edge}'
             border = tcBorders.find(qn(tag))
             if border is None:
                 border = OxmlElement(tag)
                 tcBorders.append(border)
             for k, v in edge_data.items():
-                border.set(qn('w:{}'.format(k)), str(v))
+                border.set(qn(f'w:{k}'), str(v))
 
 def create_word_document():
     doc = docx.Document()
     
-    # 1. 문서 제목
     doc.add_heading(title, level=1)
     doc.add_paragraph()
 
-    # 2. 등급 배분 섹션 (테두리 있는 블록으로)
     dist_table = doc.add_table(rows=1, cols=1)
     dist_table.style = 'Table Grid'
     dist_cell = dist_table.cell(0, 0)
-    dist_cell.text = '' # 기본 단락 제거
+    set_cell_margins(dist_cell, top=100, bottom=100, left=100, right=100)
+    dist_cell.text = ''
     p = dist_cell.add_paragraph()
     p.add_run('등급 배분').bold = True
     dist_cell.add_paragraph(f"• 배분 방식: {dist_method}")
     dist_cell.add_paragraph(f"• Process: {process_flow}")
     doc.add_paragraph()
 
-    # --- 2단 레이아웃을 위한 메인 테이블 ---
-    # 테두리를 섹션 구분선으로 사용할 것임
     layout_table = doc.add_table(rows=3, cols=2)
     layout_table.autofit = False
     layout_table.allow_autofit = False
     layout_table.columns[0].width = Cm(4)
-    layout_table.columns[1].width = Cm(13.5) # 너비 약간 조정
+    layout_table.columns[1].width = Cm(13.5)
 
     sections = {
         0: {"title": "등급별 분포 현황", "type": "table", "data": df},
@@ -104,26 +115,25 @@ def create_word_document():
         2: {"title": "평가 운영상의 Issue", "type": "list", "data": issue_list},
     }
     
-    border_style = {"sz": 6, "val": "single", "color": "000000"} # 검은색 실선
+    border_style = {"sz": 6, "val": "single", "color": "D3D3D3"} # 연한 회색으로 변경
 
     for i, section in sections.items():
         left_cell = layout_table.cell(i, 0)
         right_cell = layout_table.cell(i, 1)
 
-        # 왼쪽 셀 (제목 블록): 테두리와 내부 여백 적용
         left_cell.text = ''
         title_box = left_cell.add_table(rows=1, cols=1)
-        title_box.style = 'Table Grid' # 테두리 적용
+        title_box.style = 'Table Grid'
         title_box_cell = title_box.cell(0, 0)
         title_box_cell.text = section["title"]
         title_box_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         title_box_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        # 내부 여백(패딩) 설정
-        title_box_cell._tc.get_or_add_tcPr().get_or_add_tcMar().get_or_add_left().set(qn('w:w'), "100")
-        title_box_cell._tc.get_or_add_tcPr().get_or_add_tcMar().get_or_add_right().set(qn('w:w'), "100")
+        
+        # [수정됨] 오류가 발생하던 부분을 새로운 헬퍼 함수로 대체
+        set_cell_margins(title_box_cell, left=100, right=100, top=100, bottom=100)
 
-        # 오른쪽 셀 (내용)
         right_cell.text = ''
+        set_cell_margins(right_cell, left=200, right=100) # 오른쪽 내용 셀에도 왼쪽 여백 추가
         if section["type"] == "table":
             data_table = right_cell.add_table(rows=section["data"].shape[0] + 1, cols=section["data"].shape[1] + 1)
             data_table.style = 'Table Grid'
@@ -140,18 +150,22 @@ def create_word_document():
             for item in section["data"]:
                 right_cell.add_paragraph(item)
         
-        # 메인 레이아웃 테이블의 하단에만 테두리를 그려 섹션 구분선으로 사용
+        # 레이아웃 테이블의 하단 테두리를 그려 섹션 구분선으로 사용
         set_cell_border(left_cell, bottom=border_style, top={"val": "nil"}, start={"val": "nil"}, end={"val": "nil"})
         set_cell_border(right_cell, bottom=border_style, top={"val": "nil"}, start={"val": "nil"}, end={"val": "nil"})
 
-    # 메모리 저장
     bio = BytesIO()
     doc.save(bio)
     bio.seek(0)
     return bio
 
-# --- Streamlit UI 구성 (이전과 동일) ---
+# --- Streamlit UI 구성 (변경 없음) ---
 st.title(title)
+st.markdown("---")
+
+st.subheader("등급 배분")
+st.markdown(f"**배분 방식:** {dist_method}")
+st.markdown(f"**Process:** {process_flow}")
 st.markdown("---")
 
 def display_section(title, content, content_type):
@@ -165,11 +179,6 @@ def display_section(title, content, content_type):
             for item in content:
                 st.markdown(item)
     st.write("") 
-
-st.subheader("등급 배분")
-st.markdown(f"**배분 방식:** {dist_method}")
-st.markdown(f"**Process:** {process_flow}")
-st.markdown("---")
 
 display_section("등급별 분포 현황", df, 'table')
 display_section("구성원 VOE", voe_list, 'list')
