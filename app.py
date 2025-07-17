@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import docx
+from docx.shared import Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
 from io import BytesIO
 
 # --- 페이지 설정 ---
@@ -49,52 +52,74 @@ issue_list = [
 ]
 
 
-# --- Word 문서 생성 함수 ---
+# --- Word 문서 생성 함수 (2단 레이아웃 적용) ---
 def create_word_document():
     doc = docx.Document()
     
-    # 제목
+    # 1. 문서 제목
     doc.add_heading(title, level=1)
-
-    # 1. 등급 배분 섹션
-    doc.add_heading('등급 배분', level=2)
-    doc.add_paragraph(f"• 배분 방식: {dist_method}")
-    doc.add_paragraph(f"• Process: {process_flow}")
-    doc.add_paragraph() # 공백 추가
-
-    # 2. 등급별 분포 현황 섹션
-    doc.add_heading('등급별 분포 현황', level=2)
-    # 테이블 추가
-    table = doc.add_table(rows=df.shape[0] + 1, cols=df.shape[1] + 1)
-    table.style = 'Table Grid'
-    
-    # 테이블 헤더 (첫 행)
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = '직급'
-    for i, col_name in enumerate(df.columns):
-        hdr_cells[i+1].text = col_name
-
-    # 테이블 바디
-    for i, (index, row) in enumerate(df.iterrows()):
-        row_cells = table.rows[i+1].cells
-        row_cells[0].text = index
-        for j, value in enumerate(row):
-            row_cells[j+1].text = str(value)
     doc.add_paragraph()
 
-    # 3. 구성원 VOE 섹션
-    doc.add_heading('구성원 VOE', level=2)
-    for item in voe_list:
-        # 이모지를 텍스트로 추가
-        p = doc.add_paragraph()
-        p.add_run(item).font.name = 'Arial' # 이모지가 잘 보이도록 폰트 지정 (선택사항)
+    # 2. 등급 배분 섹션 (이 섹션은 전체 너비 사용)
+    container_box = doc.add_table(rows=1, cols=1).cell(0,0)
+    container_box.text = '' # 셀의 기본 단락 제거
+    p = container_box.add_paragraph()
+    p.add_run('등급 배분').bold = True
+    container_box.add_paragraph(f"• 배분 방식: {dist_method}")
+    container_box.add_paragraph(f"• Process: {process_flow}")
     doc.add_paragraph()
+
+    # --- 2단 레이아웃을 위한 메인 테이블 생성 ---
+    # 3행 2열의 테이블을 만들고, 테두리는 보이지 않게 처리하여 레이아웃용으로만 사용
+    layout_table = doc.add_table(rows=3, cols=2)
+    layout_table.autofit = False
+    layout_table.allow_autofit = False
     
-    # 4. 평가 운영상의 Issue 섹션
-    doc.add_heading('평가 운영상의 Issue', level=2)
-    for item in issue_list:
-        doc.add_paragraph(item, style='List Bullet')
-    
+    # 열 너비 설정 (A4용지 기준, 왼쪽:제목, 오른쪽:내용)
+    layout_table.columns[0].width = Cm(4)
+    layout_table.columns[1].width = Cm(13)
+
+    # 섹션 데이터
+    sections = {
+        0: {"title": "등급별 분포 현황", "type": "table", "data": df},
+        1: {"title": "구성원 VOE", "type": "list", "data": voe_list},
+        2: {"title": "평가 운영상의 Issue", "type": "list", "data": issue_list},
+    }
+
+    for i, section in sections.items():
+        # 왼쪽 셀 (제목)
+        left_cell = layout_table.cell(i, 0)
+        left_cell.text = ''  # 기본 단락 제거
+        # 제목을 담을 테이블을 만들어 테두리 효과를 줌
+        title_box = left_cell.add_table(rows=1, cols=1).cell(0,0)
+        title_box.text = section["title"]
+        title_box.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        left_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+        # 오른쪽 셀 (내용)
+        right_cell = layout_table.cell(i, 1)
+        right_cell.text = '' # 기본 단락 제거
+
+        if section["type"] == "table":
+            # 내용을 담을 테이블 추가 (셀 안에 테이블 추가)
+            data_table = right_cell.add_table(rows=section["data"].shape[0] + 1, cols=section["data"].shape[1] + 1)
+            data_table.style = 'Table Grid'
+            # 헤더
+            hdr_cells = data_table.rows[0].cells
+            hdr_cells[0].text = '직급'
+            for j, col_name in enumerate(section["data"].columns):
+                hdr_cells[j+1].text = col_name
+            # 내용
+            for k, (index, row) in enumerate(section["data"].iterrows()):
+                row_cells = data_table.rows[k+1].cells
+                row_cells[0].text = index
+                for l, value in enumerate(row):
+                    row_cells[l+1].text = str(value)
+
+        elif section["type"] == "list":
+            for item in section["data"]:
+                right_cell.add_paragraph(item)
+
     # 메모리에 문서를 저장하여 BytesIO 객체로 반환
     bio = BytesIO()
     doc.save(bio)
@@ -107,50 +132,44 @@ st.markdown("---")
 
 # 1. 등급 배분
 with st.container(border=True):
+    # Streamlit에서는 제목을 내부에 넣는 것이 더 깔끔해 보입니다.
     st.subheader("등급 배분")
     st.markdown(f"**배분 방식:** {dist_method}")
     st.markdown(f"**Process:** {process_flow}")
 
 st.write("") # 간격
 
-# 2. 등급별 분포 현황
-cols = st.columns([0.2, 0.8], gap="medium")
-with cols[0]:
-    with st.container(border=True):
-        st.subheader("등급별 분포 현황")
-with cols[1]:
-    st.table(df)
+# 각 섹션을 2단 레이아웃으로 표시
+def display_section(title, content, content_type):
+    cols = st.columns([0.25, 0.75], gap="medium") # 비율 조정
+    with cols[0]:
+        st.container(border=True).subheader(title)
+    with cols[1]:
+        if content_type == 'table':
+            st.table(content)
+        elif content_type == 'list':
+            for item in content:
+                st.markdown(item)
+    st.write("") # 섹션 간 간격
 
-st.write("") # 간격
+# 2. 등급별 분포 현황
+display_section("등급별 분포 현황", df, 'table')
 
 # 3. 구성원 VOE
-cols = st.columns([0.2, 0.8], gap="medium")
-with cols[0]:
-    with st.container(border=True):
-        st.subheader("구성원 VOE")
-with cols[1]:
-    for item in voe_list:
-        st.markdown(item)
-
-st.write("") # 간격
+display_section("구성원 VOE", voe_list, 'list')
 
 # 4. 평가 운영상의 Issue
-cols = st.columns([0.2, 0.8], gap="medium")
-with cols[0]:
-    with st.container(border=True):
-        st.subheader("평가 운영상의 Issue")
-with cols[1]:
-    for item in issue_list:
-        st.markdown(item)
+display_section("평가 운영상의 Issue", issue_list, 'list')
 
 st.markdown("---")
 
 # --- 다운로드 버튼 ---
 st.write("### 보고서 다운로드")
+st.info("Word 파일은 이미지와 유사한 2단 레이아웃으로 생성됩니다.")
 word_file = create_word_document()
 st.download_button(
-    label="📥 Word 파일로 다운로드",
+    label="📥 Word 파일로 다운로드 (레이아웃 적용)",
     data=word_file,
-    file_name="성과관리_운영현황_보고서.docx",
+    file_name="성과관리_운영현황_보고서_레이아웃.docx",
     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
