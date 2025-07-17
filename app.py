@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import docx
-from docx.shared import Cm
+from docx.shared import Cm, Pt, RGBColor
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from io import BytesIO
@@ -13,7 +15,6 @@ st.set_page_config(
 )
 
 # --- 데이터 정의 (이미지 내용) ---
-# 이 부분의 데이터를 수정하여 대시보드 내용을 변경할 수 있습니다.
 title = "[작성요청] 성과관리 운영 현황 (예시적 / 각 사 상황에 맞게 기재)"
 
 # 등급 배분
@@ -51,8 +52,26 @@ issue_list = [
     "(기타 각 사에서 성과관리 강화를 위해 개선이 필요한 사항들 / 타사 의견을 들어보고 싶은 사례들에 대해 기재)"
 ]
 
+# --- Word 문서 생성 함수 (블록 느낌 강화) ---
+# 테이블 셀 테두리 설정을 위한 헬퍼 함수
+def set_cell_border(cell, **kwargs):
+    tcPr = cell._tc.get_or_add_tcPr()
+    tcBorders = tcPr.first_child_found_in("w:tcBorders")
+    if tcBorders is None:
+        tcBorders = OxmlElement("w:tcBorders")
+        tcPr.append(tcBorders)
+    
+    for edge in ('start', 'top', 'end', 'bottom', 'insideH', 'insideV'):
+        edge_data = kwargs.get(edge)
+        if edge_data:
+            tag = 'w:{}'.format(edge)
+            border = tcBorders.find(qn(tag))
+            if border is None:
+                border = OxmlElement(tag)
+                tcBorders.append(border)
+            for k, v in edge_data.items():
+                border.set(qn('w:{}'.format(k)), str(v))
 
-# --- Word 문서 생성 함수 (2단 레이아웃 적용) ---
 def create_word_document():
     doc = docx.Document()
     
@@ -60,88 +79,83 @@ def create_word_document():
     doc.add_heading(title, level=1)
     doc.add_paragraph()
 
-    # 2. 등급 배분 섹션 (이 섹션은 전체 너비 사용)
-    container_box = doc.add_table(rows=1, cols=1).cell(0,0)
-    container_box.text = '' # 셀의 기본 단락 제거
-    p = container_box.add_paragraph()
+    # 2. 등급 배분 섹션 (테두리 있는 블록으로)
+    dist_table = doc.add_table(rows=1, cols=1)
+    dist_table.style = 'Table Grid'
+    dist_cell = dist_table.cell(0, 0)
+    dist_cell.text = '' # 기본 단락 제거
+    p = dist_cell.add_paragraph()
     p.add_run('등급 배분').bold = True
-    container_box.add_paragraph(f"• 배분 방식: {dist_method}")
-    container_box.add_paragraph(f"• Process: {process_flow}")
+    dist_cell.add_paragraph(f"• 배분 방식: {dist_method}")
+    dist_cell.add_paragraph(f"• Process: {process_flow}")
     doc.add_paragraph()
 
-    # --- 2단 레이아웃을 위한 메인 테이블 생성 ---
-    # 3행 2열의 테이블을 만들고, 테두리는 보이지 않게 처리하여 레이아웃용으로만 사용
+    # --- 2단 레이아웃을 위한 메인 테이블 ---
+    # 테두리를 섹션 구분선으로 사용할 것임
     layout_table = doc.add_table(rows=3, cols=2)
     layout_table.autofit = False
     layout_table.allow_autofit = False
-    
-    # 열 너비 설정 (A4용지 기준, 왼쪽:제목, 오른쪽:내용)
     layout_table.columns[0].width = Cm(4)
-    layout_table.columns[1].width = Cm(13)
+    layout_table.columns[1].width = Cm(13.5) # 너비 약간 조정
 
-    # 섹션 데이터
     sections = {
         0: {"title": "등급별 분포 현황", "type": "table", "data": df},
         1: {"title": "구성원 VOE", "type": "list", "data": voe_list},
         2: {"title": "평가 운영상의 Issue", "type": "list", "data": issue_list},
     }
+    
+    border_style = {"sz": 6, "val": "single", "color": "000000"} # 검은색 실선
 
     for i, section in sections.items():
-        # 왼쪽 셀 (제목)
         left_cell = layout_table.cell(i, 0)
-        left_cell.text = ''  # 기본 단락 제거
-        # 제목을 담을 테이블을 만들어 테두리 효과를 줌
-        title_box = left_cell.add_table(rows=1, cols=1).cell(0,0)
-        title_box.text = section["title"]
-        title_box.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        left_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        right_cell = layout_table.cell(i, 1)
+
+        # 왼쪽 셀 (제목 블록): 테두리와 내부 여백 적용
+        left_cell.text = ''
+        title_box = left_cell.add_table(rows=1, cols=1)
+        title_box.style = 'Table Grid' # 테두리 적용
+        title_box_cell = title_box.cell(0, 0)
+        title_box_cell.text = section["title"]
+        title_box_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_box_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        # 내부 여백(패딩) 설정
+        title_box_cell._tc.get_or_add_tcPr().get_or_add_tcMar().get_or_add_left().set(qn('w:w'), "100")
+        title_box_cell._tc.get_or_add_tcPr().get_or_add_tcMar().get_or_add_right().set(qn('w:w'), "100")
 
         # 오른쪽 셀 (내용)
-        right_cell = layout_table.cell(i, 1)
-        right_cell.text = '' # 기본 단락 제거
-
+        right_cell.text = ''
         if section["type"] == "table":
-            # 내용을 담을 테이블 추가 (셀 안에 테이블 추가)
             data_table = right_cell.add_table(rows=section["data"].shape[0] + 1, cols=section["data"].shape[1] + 1)
             data_table.style = 'Table Grid'
-            # 헤더
             hdr_cells = data_table.rows[0].cells
             hdr_cells[0].text = '직급'
             for j, col_name in enumerate(section["data"].columns):
                 hdr_cells[j+1].text = col_name
-            # 내용
             for k, (index, row) in enumerate(section["data"].iterrows()):
                 row_cells = data_table.rows[k+1].cells
                 row_cells[0].text = index
                 for l, value in enumerate(row):
                     row_cells[l+1].text = str(value)
-
         elif section["type"] == "list":
             for item in section["data"]:
                 right_cell.add_paragraph(item)
+        
+        # 메인 레이아웃 테이블의 하단에만 테두리를 그려 섹션 구분선으로 사용
+        set_cell_border(left_cell, bottom=border_style, top={"val": "nil"}, start={"val": "nil"}, end={"val": "nil"})
+        set_cell_border(right_cell, bottom=border_style, top={"val": "nil"}, start={"val": "nil"}, end={"val": "nil"})
 
-    # 메모리에 문서를 저장하여 BytesIO 객체로 반환
+    # 메모리 저장
     bio = BytesIO()
     doc.save(bio)
     bio.seek(0)
     return bio
 
-# --- Streamlit UI 구성 ---
+# --- Streamlit UI 구성 (이전과 동일) ---
 st.title(title)
 st.markdown("---")
 
-# 1. 등급 배분
-with st.container(border=True):
-    # Streamlit에서는 제목을 내부에 넣는 것이 더 깔끔해 보입니다.
-    st.subheader("등급 배분")
-    st.markdown(f"**배분 방식:** {dist_method}")
-    st.markdown(f"**Process:** {process_flow}")
-
-st.write("") # 간격
-
-# 각 섹션을 2단 레이아웃으로 표시
 def display_section(title, content, content_type):
-    cols = st.columns([0.25, 0.75], gap="medium") # 비율 조정
+    cols = st.columns([0.25, 0.75], gap="medium")
     with cols[0]:
         st.container(border=True).subheader(title)
     with cols[1]:
@@ -150,26 +164,26 @@ def display_section(title, content, content_type):
         elif content_type == 'list':
             for item in content:
                 st.markdown(item)
-    st.write("") # 섹션 간 간격
+    st.write("") 
 
-# 2. 등급별 분포 현황
+st.subheader("등급 배분")
+st.markdown(f"**배분 방식:** {dist_method}")
+st.markdown(f"**Process:** {process_flow}")
+st.markdown("---")
+
 display_section("등급별 분포 현황", df, 'table')
-
-# 3. 구성원 VOE
 display_section("구성원 VOE", voe_list, 'list')
-
-# 4. 평가 운영상의 Issue
 display_section("평가 운영상의 Issue", issue_list, 'list')
 
 st.markdown("---")
 
 # --- 다운로드 버튼 ---
 st.write("### 보고서 다운로드")
-st.info("Word 파일은 이미지와 유사한 2단 레이아웃으로 생성됩니다.")
+st.info("Word 파일은 '블록 느낌'을 강화한 2단 레이아웃으로 생성됩니다.")
 word_file = create_word_document()
 st.download_button(
-    label="📥 Word 파일로 다운로드 (레이아웃 적용)",
+    label="📥 Word 파일로 다운로드 (블록 레이아웃)",
     data=word_file,
-    file_name="성과관리_운영현황_보고서_레이아웃.docx",
+    file_name="성과관리_운영현황_보고서_블록.docx",
     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
