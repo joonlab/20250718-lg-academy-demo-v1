@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import docx
-from docx.shared import Cm, Pt
+from docx.shared import Cm
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -16,12 +16,8 @@ st.set_page_config(
 
 # --- 데이터 정의 (이미지 내용) ---
 title = "[작성요청] 성과관리 운영 현황 (예시적 / 각 사 상황에 맞게 기재)"
-
-# 등급 배분
 dist_method = "절대평가"
 process_flow = "팀장 점수 평가/등급 제안 → 등급 심의 위원회 실시(위원장: 담당) → 개인별 등급 피드백(확정) → 이의 제기 → 최종 확정"
-
-# 등급별 분포 현황 표 데이터
 table_data = {
     '평가': ['S', 'A', 'B', 'C', 'D'],
     '책임(인원비중: 50%)': ['XX%', 'XX%', 'XX%', 'XX%', 'XX%'],
@@ -30,8 +26,6 @@ table_data = {
     'Total': ['XX%', 'XX%', 'XX%', 'XX%', 'XX%']
 }
 df = pd.DataFrame(table_data).set_index('평가').T
-
-# 구성원 VOE
 voe_list = [
     "🟢 절대평가 전환 이후 진급이나 연차에 따른 평가 왜곡은 많이 개선된 것으로 느껴짐",
     "🟢 절대평가 전환 이후 조직 내 경쟁이 줄어들어 동료 의식이 강화되고 팀워크에 도움이 되는 것 같음",
@@ -40,8 +34,6 @@ voe_list = [
     "🔴 절대평가 전환 이후 재원은 한정된 상황에서 평가가 관대화되다 보니 전반적인 임금경쟁력이 낮아지는 경향이 있고, 고성과자에 대한 동기부여도 되지 않음. 차라리 상대평가가 나을 것 같음",
     "🔴 평가 기준이 조직별로 달라 타 팀의 A와 나 팀의 A가 같지 않은 경향이 있음"
 ]
-
-# 평가 운영상의 Issue
 issue_list = [
     "- Pay Band를 기준으로 평가/보상을 분리하지 않아 저 직급 인원의 저평가 현상이 나타남.",
     "- 평가 공정성 제고를 위해 수시 성과관리를 강화하려고 하나, 조직 책임자들의 업무 Load 증가로 인한 불만 증가",
@@ -52,39 +44,60 @@ issue_list = [
     "(기타 각 사에서 성과관리 강화를 위해 개선이 필요한 사항들 / 타사 의견을 들어보고 싶은 사례들에 대해 기재)"
 ]
 
-# --- Word 문서 생성을 위한 헬퍼 함수들 ---
+# --- Word 문서 생성을 위한 안정적인 헬퍼 함수들 ---
 
-# [수정됨] 셀 내부 여백(패딩) 설정을 위한 헬퍼 함수
 def set_cell_margins(cell, **kwargs):
     """
-    셀의 내부 여백을 설정합니다. top, bottom, left, right 값을 dxa 단위(1/20 pt)로 받습니다.
+    [오류 수정] 셀의 내부 여백을 안정적으로 설정합니다.
+    kwargs: top, bottom, left, right (값은 dxa 단위, 1/20 pt)
     """
     tcPr = cell._tc.get_or_add_tcPr()
-    tcMar = tcPr.get_or_add_tcMar()
-
-    for key, value in kwargs.items():
-        if key in ["top", "bottom", "left", "right"]:
-            # OxmlElement를 직접 생성하여 추가하는 올바른 방법
-            mar_elm = OxmlElement(f'w:{key}')
-            mar_elm.set(qn('w:w'), str(value))
-            mar_elm.set(qn('w:type'), 'dxa')
-            tcMar.append(mar_elm)
-
-# 셀 테두리 설정을 위한 헬퍼 함수
-def set_cell_border(cell, **kwargs):
-    tcPr = cell._tc.get_or_add_tcPr()
-    tcBorders = tcPr.get_or_add_tcBorders()
     
+    # <w:tcMar> 요소를 찾거나, 없으면 새로 생성합니다.
+    tcMar = tcPr.find(qn('w:tcMar'))
+    if tcMar is None:
+        tcMar = OxmlElement('w:tcMar')
+        tcPr.append(tcMar)
+
+    # 각 방향(top, bottom, left, right)의 여백을 설정합니다.
+    for key, val in kwargs.items():
+        if key in ('top', 'bottom', 'left', 'right'):
+            tag = f'w:{key}'
+            # 해당 방향의 요소를 찾거나, 없으면 새로 생성합니다.
+            element = tcMar.find(qn(tag))
+            if element is None:
+                element = OxmlElement(tag)
+                tcMar.append(element)
+            
+            element.set(qn('w:w'), str(val))
+            element.set(qn('w:type'), 'dxa')
+
+def set_cell_border(cell, **kwargs):
+    """
+    [안정성 강화] 셀의 테두리를 안정적으로 설정합니다.
+    """
+    tcPr = cell._tc.get_or_add_tcPr()
+    
+    # <w:tcBorders> 요소를 찾거나, 없으면 새로 생성합니다.
+    tcBorders = tcPr.find(qn('w:tcBorders'))
+    if tcBorders is None:
+        tcBorders = OxmlElement('w:tcBorders')
+        tcPr.append(tcBorders)
+    
+    # 각 테두리(start, top, end, bottom)를 설정합니다.
     for edge in ('start', 'top', 'end', 'bottom'):
         edge_data = kwargs.get(edge)
         if edge_data:
             tag = f'w:{edge}'
+            # 해당 테두리 요소를 찾거나, 없으면 새로 생성합니다.
             border = tcBorders.find(qn(tag))
             if border is None:
                 border = OxmlElement(tag)
                 tcBorders.append(border)
+            
             for k, v in edge_data.items():
                 border.set(qn(f'w:{k}'), str(v))
+
 
 def create_word_document():
     doc = docx.Document()
@@ -95,7 +108,7 @@ def create_word_document():
     dist_table = doc.add_table(rows=1, cols=1)
     dist_table.style = 'Table Grid'
     dist_cell = dist_table.cell(0, 0)
-    set_cell_margins(dist_cell, top=100, bottom=100, left=100, right=100)
+    set_cell_margins(dist_cell, top=100, bottom=100, left=120, right=120)
     dist_cell.text = ''
     p = dist_cell.add_paragraph()
     p.add_run('등급 배분').bold = True
@@ -115,7 +128,7 @@ def create_word_document():
         2: {"title": "평가 운영상의 Issue", "type": "list", "data": issue_list},
     }
     
-    border_style = {"sz": 6, "val": "single", "color": "D3D3D3"} # 연한 회색으로 변경
+    border_style = {"sz": 4, "val": "single", "color": "D3D3D3"}
 
     for i, section in sections.items():
         left_cell = layout_table.cell(i, 0)
@@ -128,12 +141,10 @@ def create_word_document():
         title_box_cell.text = section["title"]
         title_box_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         title_box_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        
-        # [수정됨] 오류가 발생하던 부분을 새로운 헬퍼 함수로 대체
-        set_cell_margins(title_box_cell, left=100, right=100, top=100, bottom=100)
+        set_cell_margins(title_box_cell, left=100, right=100, top=150, bottom=150)
 
         right_cell.text = ''
-        set_cell_margins(right_cell, left=200, right=100) # 오른쪽 내용 셀에도 왼쪽 여백 추가
+        set_cell_margins(right_cell, left=200, right=100, top=100, bottom=100)
         if section["type"] == "table":
             data_table = right_cell.add_table(rows=section["data"].shape[0] + 1, cols=section["data"].shape[1] + 1)
             data_table.style = 'Table Grid'
@@ -150,7 +161,7 @@ def create_word_document():
             for item in section["data"]:
                 right_cell.add_paragraph(item)
         
-        # 레이아웃 테이블의 하단 테두리를 그려 섹션 구분선으로 사용
+        # 'start'는 왼쪽, 'end'는 오른쪽 테두리를 의미합니다.
         set_cell_border(left_cell, bottom=border_style, top={"val": "nil"}, start={"val": "nil"}, end={"val": "nil"})
         set_cell_border(right_cell, bottom=border_style, top={"val": "nil"}, start={"val": "nil"}, end={"val": "nil"})
 
@@ -186,7 +197,6 @@ display_section("평가 운영상의 Issue", issue_list, 'list')
 
 st.markdown("---")
 
-# --- 다운로드 버튼 ---
 st.write("### 보고서 다운로드")
 st.info("Word 파일은 '블록 느낌'을 강화한 2단 레이아웃으로 생성됩니다.")
 word_file = create_word_document()
