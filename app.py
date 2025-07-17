@@ -47,23 +47,15 @@ issue_list = [
 # --- Word 문서 생성을 위한 안정적인 헬퍼 함수들 ---
 
 def set_cell_margins(cell, **kwargs):
-    """
-    [오류 수정] 셀의 내부 여백을 안정적으로 설정합니다.
-    kwargs: top, bottom, left, right (값은 dxa 단위, 1/20 pt)
-    """
     tcPr = cell._tc.get_or_add_tcPr()
-    
-    # <w:tcMar> 요소를 찾거나, 없으면 새로 생성합니다.
     tcMar = tcPr.find(qn('w:tcMar'))
     if tcMar is None:
         tcMar = OxmlElement('w:tcMar')
         tcPr.append(tcMar)
 
-    # 각 방향(top, bottom, left, right)의 여백을 설정합니다.
     for key, val in kwargs.items():
         if key in ('top', 'bottom', 'left', 'right'):
             tag = f'w:{key}'
-            # 해당 방향의 요소를 찾거나, 없으면 새로 생성합니다.
             element = tcMar.find(qn(tag))
             if element is None:
                 element = OxmlElement(tag)
@@ -73,23 +65,16 @@ def set_cell_margins(cell, **kwargs):
             element.set(qn('w:type'), 'dxa')
 
 def set_cell_border(cell, **kwargs):
-    """
-    [안정성 강화] 셀의 테두리를 안정적으로 설정합니다.
-    """
     tcPr = cell._tc.get_or_add_tcPr()
-    
-    # <w:tcBorders> 요소를 찾거나, 없으면 새로 생성합니다.
     tcBorders = tcPr.find(qn('w:tcBorders'))
     if tcBorders is None:
         tcBorders = OxmlElement('w:tcBorders')
         tcPr.append(tcBorders)
     
-    # 각 테두리(start, top, end, bottom)를 설정합니다.
     for edge in ('start', 'top', 'end', 'bottom'):
         edge_data = kwargs.get(edge)
         if edge_data:
             tag = f'w:{edge}'
-            # 해당 테두리 요소를 찾거나, 없으면 새로 생성합니다.
             border = tcBorders.find(qn(tag))
             if border is None:
                 border = OxmlElement(tag)
@@ -161,8 +146,8 @@ def create_word_document():
             for item in section["data"]:
                 right_cell.add_paragraph(item)
         
-        # 'start'는 왼쪽, 'end'는 오른쪽 테두리를 의미합니다.
-        set_cell_border(left_cell, bottom=border_style, top={"val": "nil"}, start={"val": "nil"}, end={"val": "nil"})
+        # [수정된 부분] 왼쪽 셀에 오른쪽 테두리('end')를 추가하여 세로선을 만듭니다.
+        set_cell_border(left_cell, bottom=border_style, end=border_style, top={"val": "nil"}, start={"val": "nil"})
         set_cell_border(right_cell, bottom=border_style, top={"val": "nil"}, start={"val": "nil"}, end={"val": "nil"})
 
     bio = BytesIO()
